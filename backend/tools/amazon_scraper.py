@@ -48,7 +48,6 @@ def _scrape_amazon(query: str) -> list[dict]:
                     "--disable-setuid-sandbox",
                     "--no-sandbox",
                     "--no-zygote",
-                    "--single-process",
                     "--disable-accelerated-2d-canvas",
                     "--no-first-run",
                     "--js-flags=--max-old-space-size=128",

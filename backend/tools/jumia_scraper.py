@@ -39,21 +39,17 @@ def _scrape_jumia(query: str) -> list[dict]:
     products = []
     html = ""
 
-    # 1. Try fetching via Playwright to bypass Cloudflare 403 Forbidden
+    # 1. Try fetching via Playwright Chromium (without --single-process to prevent HTTP2 errors)
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(
                 headless=HEADLESS,
                 args=[
-                    "--disable-gpu",
                     "--disable-dev-shm-usage",
-                    "--disable-setuid-sandbox",
                     "--no-sandbox",
+                    "--disable-gpu",
+                    "--disable-setuid-sandbox",
                     "--no-zygote",
-                    "--single-process",
-                    "--disable-accelerated-2d-canvas",
-                    "--no-first-run",
-                    "--js-flags=--max-old-space-size=128",
                 ],
             )
             context = browser.new_context(
@@ -72,11 +68,14 @@ def _scrape_jumia(query: str) -> list[dict]:
             browser.close()
     except Exception as e:
         logger.warning(f"Jumia Playwright error: {e}. Trying HTTP fallback...")
+
+    # 2. HTTP Fallback if Playwright was blocked
+    if not html:
         try:
             headers = {
                 "User-Agent": USER_AGENT,
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.9,ar;q=0.8",
+                "Accept-Language": "en-US,en;q=0.9",
                 "Sec-Ch-Ua": '"Chromium";v="125", "Not.A/Brand";v="24"',
                 "Sec-Ch-Ua-Mobile": "?0",
                 "Sec-Ch-Ua-Platform": '"Windows"',
