@@ -14,6 +14,8 @@ try:
         HEADLESS,
         MAX_PRODUCTS_PER_SITE,
         NOON_BASE_URL,
+        SCRAPER_PROXY_URL,
+        USER_AGENT,
     )
     from models.schemas import RawProduct
 except ImportError:
@@ -21,6 +23,8 @@ except ImportError:
         HEADLESS,
         MAX_PRODUCTS_PER_SITE,
         NOON_BASE_URL,
+        SCRAPER_PROXY_URL,
+        USER_AGENT,
     )
     from backend.models.schemas import RawProduct
 
@@ -28,32 +32,30 @@ logger = logging.getLogger(__name__)
 
 
 def _scrape_noon(query: str) -> list[dict]:
-    """Launch Chromium browser, search Noon, parse product cards."""
+    """Launch Firefox browser, search Noon, parse product cards."""
     url = f"{NOON_BASE_URL}/search?q={quote_plus(query)}"
     products = []
     html = ""
 
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(
-                headless=HEADLESS,
-                args=[
-                    "--disable-dev-shm-usage",
-                    "--no-sandbox",
-                    "--disable-setuid-sandbox",
-                ],
-            )
+            launch_kwargs = {"headless": HEADLESS}
+            if SCRAPER_PROXY_URL:
+                launch_kwargs["proxy"] = {"server": SCRAPER_PROXY_URL}
+
+            browser = p.firefox.launch(**launch_kwargs)
             context = browser.new_context(
+                user_agent=USER_AGENT,
                 viewport={"width": 1400, "height": 900},
                 locale="en-US",
             )
             page = context.new_page()
-            page.goto(url, wait_until="domcontentloaded", timeout=25000)
+            page.goto(url, wait_until="commit", timeout=25000)
             page.wait_for_timeout(3000)
             html = page.content()
             browser.close()
     except Exception as e:
-        logger.error(f"Noon Playwright error: {e}")
+        logger.error(f"Noon Playwright Firefox error: {e}")
         return []
 
     soup = BeautifulSoup(html, "html.parser")

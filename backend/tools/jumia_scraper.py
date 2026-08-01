@@ -13,6 +13,7 @@ try:
     from config import (
         JUMIA_BASE_URL,
         MAX_PRODUCTS_PER_SITE,
+        SCRAPER_PROXY_URL,
         SELECTORS,
         USER_AGENT,
     )
@@ -21,6 +22,7 @@ except ImportError:
     from backend.config import (
         JUMIA_BASE_URL,
         MAX_PRODUCTS_PER_SITE,
+        SCRAPER_PROXY_URL,
         SELECTORS,
         USER_AGENT,
     )
@@ -51,7 +53,8 @@ def _scrape_jumia(query: str) -> list[dict]:
     })
 
     try:
-        response = session.get(url, timeout=12)
+        proxies = {"http": SCRAPER_PROXY_URL, "https": SCRAPER_PROXY_URL} if SCRAPER_PROXY_URL else None
+        response = session.get(url, timeout=12, proxies=proxies)
         if response.status_code != 200:
             logger.warning(f"Jumia returned HTTP {response.status_code}")
             return []

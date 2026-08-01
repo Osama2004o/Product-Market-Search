@@ -21,6 +21,7 @@ JUMIA_BASE_URL = os.getenv("JUMIA_BASE_URL", "https://www.jumia.com.eg")
 # Scraping config
 REQUEST_TIMEOUT_SECONDS = int(os.getenv("REQUEST_TIMEOUT_SECONDS", "30"))
 MAX_PRODUCTS_PER_SITE = int(os.getenv("MAX_PRODUCTS_PER_SITE", "5"))
+SCRAPER_PROXY_URL = os.getenv("SCRAPER_PROXY_URL", "")
 
 # Playwright settings
 HEADLESS = os.getenv("HEADLESS", "true").lower() == "true"
