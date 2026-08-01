@@ -34,6 +34,12 @@ app.add_middleware(
 app.include_router(search_router, prefix="/api")
 
 
+@app.get("/")
+async def root():
+    return {"status": "ok", "message": "Product Market Search Backend API"}
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
