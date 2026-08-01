@@ -1,4 +1,4 @@
-"""Jumia scraper tool using Playwright (Chromium) + HTTP fallback + BeautifulSoup."""
+"""Jumia scraper tool using high-performance HTTP Session + BeautifulSoup."""
 
 import json
 import logging
@@ -8,11 +8,9 @@ from urllib.parse import quote_plus
 import requests
 from bs4 import BeautifulSoup
 from crewai.tools import BaseTool
-from playwright.sync_api import sync_playwright
 
 try:
     from config import (
-        HEADLESS,
         JUMIA_BASE_URL,
         MAX_PRODUCTS_PER_SITE,
         SELECTORS,
@@ -21,7 +19,6 @@ try:
     from models.schemas import RawProduct
 except ImportError:
     from backend.config import (
-        HEADLESS,
         JUMIA_BASE_URL,
         MAX_PRODUCTS_PER_SITE,
         SELECTORS,
@@ -34,66 +31,39 @@ sel = SELECTORS["jumia"]
 
 
 def _scrape_jumia(query: str) -> list[dict]:
-    """Search Jumia using Playwright Chromium with HTTP fallback."""
+    """Search Jumia using HTTP Session with browser headers (fast & reliable)."""
     url = f"{JUMIA_BASE_URL}/catalog/?q={quote_plus(query)}"
     products = []
-    html = ""
 
-    # 1. Try fetching via Playwright Chromium (without --single-process to prevent HTTP2 errors)
+    session = requests.Session()
+    session.headers.update({
+        "User-Agent": USER_AGENT,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9,ar;q=0.8",
+        "Sec-Ch-Ua": '"Chromium";v="125", "Not.A/Brand";v="24"',
+        "Sec-Ch-Ua-Mobile": "?0",
+        "Sec-Ch-Ua-Platform": '"Windows"',
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Sec-Fetch-User": "?1",
+        "Upgrade-Insecure-Requests": "1",
+    })
+
     try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(
-                headless=HEADLESS,
-                args=[
-                    "--disable-dev-shm-usage",
-                    "--no-sandbox",
-                    "--disable-gpu",
-                    "--disable-setuid-sandbox",
-                    "--no-zygote",
-                ],
-            )
-            context = browser.new_context(
-                user_agent=USER_AGENT,
-                viewport={"width": 1400, "height": 900},
-                locale="en-US",
-                extra_http_headers={
-                    "Accept-Language": "en-US,en;q=0.9,ar;q=0.8",
-                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                },
-            )
-            page = context.new_page()
-            page.goto(url, wait_until="domcontentloaded", timeout=20000)
-            page.wait_for_timeout(2000)
-            html = page.content()
-            browser.close()
+        response = session.get(url, timeout=12)
+        if response.status_code != 200:
+            logger.warning(f"Jumia returned HTTP {response.status_code}")
+            return []
+        html = response.text
     except Exception as e:
-        logger.warning(f"Jumia Playwright error: {e}. Trying HTTP fallback...")
-
-    # 2. HTTP Fallback if Playwright was blocked
-    if not html:
-        try:
-            headers = {
-                "User-Agent": USER_AGENT,
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.9",
-                "Sec-Ch-Ua": '"Chromium";v="125", "Not.A/Brand";v="24"',
-                "Sec-Ch-Ua-Mobile": "?0",
-                "Sec-Ch-Ua-Platform": '"Windows"',
-                "Upgrade-Insecure-Requests": "1",
-            }
-            response = requests.get(url, headers=headers, timeout=12)
-            if response.status_code == 200:
-                html = response.text
-        except Exception as http_err:
-            logger.error(f"Jumia HTTP request error: {http_err}")
-
-    if not html:
+        logger.error(f"Jumia HTTP request failed: {e}")
         return []
 
     soup = BeautifulSoup(html, "html.parser")
     cards = soup.select(sel["product_card"])
     if not cards:
-        cards = soup.select("article.prd")
+        cards = soup.select("article.prd") or soup.select("article")
     cards = cards[:MAX_PRODUCTS_PER_SITE]
 
     for card in cards:
@@ -101,7 +71,7 @@ def _scrape_jumia(query: str) -> list[dict]:
             # Title
             title_el = card.select_one(sel["title"]) or card.select_one("h3.name") or card.select_one("h3")
             title = title_el.get_text(strip=True) if title_el else None
-            if not title:
+            if not title or len(title) < 3:
                 continue
 
             # Price
@@ -111,7 +81,10 @@ def _scrape_jumia(query: str) -> list[dict]:
                 price_text = price_el.get_text(strip=True).replace(",", "")
                 match = re.search(r"([\d.]+)", price_text)
                 if match:
-                    price = float(match.group(1))
+                    try:
+                        price = float(match.group(1))
+                    except ValueError:
+                        pass
 
             # Rating
             rating = None
@@ -119,11 +92,17 @@ def _scrape_jumia(query: str) -> list[dict]:
             if rating_el:
                 data_rating = rating_el.get("data-rating")
                 if data_rating:
-                    rating = float(data_rating)
+                    try:
+                        rating = float(data_rating)
+                    except ValueError:
+                        pass
                 else:
                     match = re.search(r"([\d.]+)", rating_el.get_text())
                     if match:
-                        rating = float(match.group(1))
+                        try:
+                            rating = float(match.group(1))
+                        except ValueError:
+                            pass
 
             # Review count
             review_count = None
@@ -132,7 +111,10 @@ def _scrape_jumia(query: str) -> list[dict]:
                 text = rev_el.get_text(strip=True).replace(",", "")
                 match = re.search(r"(\d+)", text)
                 if match:
-                    review_count = int(match.group(1))
+                    try:
+                        review_count = int(match.group(1))
+                    except ValueError:
+                        pass
 
             # URL
             url_el = card.select_one(sel["url"]) or card.select_one("a.core") or card.select_one("a")
