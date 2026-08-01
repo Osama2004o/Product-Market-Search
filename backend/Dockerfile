@@ -7,19 +7,14 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# Install system dependencies needed for Playwright Chromium
+# Install minimal system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    wget \
-    gnupg \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install python packages
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-
-# Install Playwright dependencies & Firefox/Chromium browsers
-RUN playwright install --with-deps firefox chromium
 
 # Copy application code
 COPY . .

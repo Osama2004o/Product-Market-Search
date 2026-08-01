@@ -1,4 +1,4 @@
-"""Noon scraper tool using Playwright with HTTP/2 disabled to prevent network errors."""
+"""Noon scraper — pure HTTP via curl_cffi. No Playwright, no browser, zero RAM."""
 
 import json
 import logging
@@ -7,64 +7,103 @@ from urllib.parse import quote_plus
 
 from bs4 import BeautifulSoup
 from crewai.tools import BaseTool
-from playwright.sync_api import sync_playwright
+from curl_cffi import requests as crequests
 
 try:
-    from config import HEADLESS, MAX_PRODUCTS_PER_SITE, NOON_BASE_URL, SCRAPER_PROXY_URL, USER_AGENT
+    from config import MAX_PRODUCTS_PER_SITE, NOON_BASE_URL
     from models.schemas import RawProduct
 except ImportError:
-    from backend.config import HEADLESS, MAX_PRODUCTS_PER_SITE, NOON_BASE_URL, SCRAPER_PROXY_URL, USER_AGENT
+    from backend.config import MAX_PRODUCTS_PER_SITE, NOON_BASE_URL
     from backend.models.schemas import RawProduct
 
 logger = logging.getLogger(__name__)
 
 
 def _scrape_noon(query: str) -> list[dict]:
-    """Launch lightweight Chromium with HTTP/1.1 forced to avoid ERR_HTTP2_PROTOCOL_ERROR."""
+    """Fetch Noon search page via curl_cffi and extract products from __NEXT_DATA__ or HTML."""
     url = f"{NOON_BASE_URL}/search?q={quote_plus(query)}"
     products = []
-    html = ""
 
     try:
-        with sync_playwright() as p:
-            launch_kwargs = {
-                "headless": HEADLESS,
-                "args": [
-                    "--disable-gpu",
-                    "--disable-dev-shm-usage",
-                    "--no-sandbox",
-                    "--disable-http2",  # Fixes ERR_HTTP2_PROTOCOL_ERROR
-                    "--js-flags=--max-old-space-size=64",
-                ],
-            }
-            if SCRAPER_PROXY_URL:
-                launch_kwargs["proxy"] = {"server": SCRAPER_PROXY_URL}
-
-            browser = p.chromium.launch(**launch_kwargs)
-            context = browser.new_context(
-                user_agent=USER_AGENT,
-                viewport={"width": 1280, "height": 720},
-                locale="en-US",
-            )
-            page = context.new_page()
-
-            # Abort heavy assets (images/media) but keep scripts/styles for DOM stability
-            page.route(
-                "**/*",
-                lambda route: route.abort()
-                if route.request.resource_type in ["image", "font", "media"]
-                else route.continue_(),
-            )
-
-            page.goto(url, wait_until="domcontentloaded", timeout=7000)
-            html = page.content()
-            browser.close()
+        session = crequests.Session(impersonate="chrome120")
+        response = session.get(url, timeout=7)
+        if response.status_code != 200:
+            logger.warning(f"Noon returned HTTP {response.status_code}")
+            return []
+        html = response.text
     except Exception as e:
-        logger.error(f"Noon Playwright error: {e}")
+        logger.error(f"Noon HTTP request failed: {e}")
         return []
 
+    # ── Strategy 1: Parse __NEXT_DATA__ JSON (structured, reliable) ──
     soup = BeautifulSoup(html, "html.parser")
-    links = soup.select("a[href*='/p/']") or soup.select("div[data-qa='product-item']") or soup.select("a")
+    next_data_tag = soup.select_one("script#__NEXT_DATA__")
+    if next_data_tag:
+        try:
+            data = json.loads(next_data_tag.string)
+            # Navigate to the product hits inside Noon's Next.js page props
+            props = data.get("props", {}).get("pageProps", {})
+            # Noon stores search results under different keys depending on version
+            catalog = (
+                props.get("catalog", {})
+                or props.get("searchResult", {})
+                or props
+            )
+            hits = catalog.get("hits", []) or catalog.get("products", []) or []
+
+            for item in hits[:MAX_PRODUCTS_PER_SITE]:
+                try:
+                    title = item.get("name") or item.get("title") or item.get("name_en", "")
+                    if not title or len(title) < 3:
+                        continue
+
+                    price = None
+                    price_val = item.get("sale_price") or item.get("price") or item.get("offer", {}).get("sale_price")
+                    if price_val:
+                        try:
+                            price = float(price_val)
+                        except (ValueError, TypeError):
+                            pass
+
+                    rating = None
+                    rating_val = item.get("rating") or item.get("avg_rating")
+                    if rating_val:
+                        try:
+                            r = float(rating_val)
+                            if 0 <= r <= 5:
+                                rating = r
+                        except (ValueError, TypeError):
+                            pass
+
+                    sku = item.get("sku") or item.get("product_sku") or ""
+                    product_url = f"https://www.noon.com/egypt-en/p/{sku}" if sku else None
+
+                    image_url = item.get("image_url") or item.get("image_key")
+                    if image_url and not image_url.startswith("http"):
+                        image_url = f"https://f.nooncdn.com/p/{image_url}.jpg"
+
+                    products.append(
+                        RawProduct(
+                            site="noon",
+                            title=title[:150],
+                            price=price,
+                            currency="EGP",
+                            rating=rating,
+                            url=product_url,
+                            image_url=image_url,
+                        ).model_dump()
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to parse Noon JSON item: {e}")
+                    continue
+
+            if products:
+                return products
+        except (json.JSONDecodeError, KeyError, TypeError) as e:
+            logger.warning(f"Noon __NEXT_DATA__ parse failed, falling back to HTML: {e}")
+
+    # ── Strategy 2: Fallback to HTML scraping ──
+    links = soup.select("a[href*='/p/']") or soup.select("a")
     seen_urls = set()
 
     for link in links:
@@ -125,7 +164,7 @@ def _scrape_noon(query: str) -> list[dict]:
                 ).model_dump()
             )
         except Exception as e:
-            logger.warning(f"Failed to parse Noon item: {e}")
+            logger.warning(f"Failed to parse Noon HTML item: {e}")
             continue
 
     return products

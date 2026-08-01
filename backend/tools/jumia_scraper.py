@@ -1,4 +1,4 @@
-"""Jumia scraper tool using curl_cffi to bypass Cloudflare 403 blocks."""
+"""Jumia scraper — curl_cffi Session with cookie warm-up to bypass Cloudflare 403."""
 
 import json
 import logging
@@ -10,10 +10,10 @@ from crewai.tools import BaseTool
 from curl_cffi import requests as crequests
 
 try:
-    from config import JUMIA_BASE_URL, MAX_PRODUCTS_PER_SITE, SELECTORS, USER_AGENT
+    from config import JUMIA_BASE_URL, MAX_PRODUCTS_PER_SITE, SELECTORS
     from models.schemas import RawProduct
 except ImportError:
-    from backend.config import JUMIA_BASE_URL, MAX_PRODUCTS_PER_SITE, SELECTORS, USER_AGENT
+    from backend.config import JUMIA_BASE_URL, MAX_PRODUCTS_PER_SITE, SELECTORS
     from backend.models.schemas import RawProduct
 
 logger = logging.getLogger(__name__)
@@ -21,24 +21,21 @@ sel = SELECTORS["jumia"]
 
 
 def _scrape_jumia(query: str) -> list[dict]:
-    """Search Jumia using browser TLS impersonation to bypass 403 Cloudflare blocks."""
+    """Use a Session to warm up Cloudflare cookies on homepage, then search."""
     url = f"{JUMIA_BASE_URL}/catalog/?q={quote_plus(query)}"
     products = []
 
-    headers = {
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9,ar;q=0.8",
-        "Upgrade-Insecure-Requests": "1",
-    }
-
     try:
-        # impersonate="chrome120" bypasses Cloudflare TLS fingerprinting on Render
-        response = crequests.get(
-            url,
-            headers=headers,
-            impersonate="chrome120",
-            timeout=8,
-        )
+        session = crequests.Session(impersonate="chrome120")
+
+        # Step 1: Hit homepage to get cf_clearance / __cf_bm cookies
+        try:
+            session.get(JUMIA_BASE_URL, timeout=5)
+        except Exception:
+            pass  # Best-effort cookie warm-up; continue even if it fails
+
+        # Step 2: Search with established session cookies
+        response = session.get(url, timeout=8)
         if response.status_code != 200:
             logger.warning(f"Jumia returned HTTP {response.status_code}")
             return []
