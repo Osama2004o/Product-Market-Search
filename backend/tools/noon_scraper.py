@@ -36,7 +36,7 @@ def _scrape_noon(query: str) -> list[dict]:
 
     try:
         with sync_playwright() as p:
-            browser = p.firefox.launch(headless=HEADLESS)
+            browser = p.chromium.launch(headless=HEADLESS)
             context = browser.new_context(
                 user_agent=USER_AGENT,
                 viewport={"width": 1400, "height": 900},

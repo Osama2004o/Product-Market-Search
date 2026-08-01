@@ -7,7 +7,7 @@ load_dotenv()
 
 # API Keys
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini/gemini-3.5-flash-lite")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini/gemini-2.0-flash")
 
 if GEMINI_API_KEY and not os.getenv("GOOGLE_API_KEY"):
     os.environ["GOOGLE_API_KEY"] = GEMINI_API_KEY
