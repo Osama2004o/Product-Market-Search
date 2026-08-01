@@ -46,10 +46,16 @@ async def run_product_search(query: str) -> dict[str, Any]:
 
     for site, scraper_func in scrapers:
         try:
-            res = await asyncio.to_thread(scraper_func, query)
+            res = await asyncio.wait_for(
+                asyncio.to_thread(scraper_func, query),
+                timeout=12.0,
+            )
             if isinstance(res, list):
                 logger.info(f"Fetched {len(res)} products from {site}")
                 all_raw_products.extend(res)
+        except asyncio.TimeoutError:
+            logger.warning(f"Scraper for '{site}' timed out after 12s. Moving to next site.")
+            warnings.append(f"Scraper for {site.capitalize()} timed out.")
         except Exception as e:
             logger.error(f"Scraper error on {site}: {e}")
             warnings.append(f"Failed to fetch products from {site.capitalize()}")

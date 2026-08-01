@@ -63,8 +63,8 @@ def _scrape_amazon(query: str) -> list[dict]:
                 },
             )
             page = context.new_page()
-            page.goto(url, wait_until="domcontentloaded", timeout=20000)
-            page.wait_for_timeout(2500)
+            page.goto(url, wait_until="domcontentloaded", timeout=12000)
+            page.wait_for_timeout(1500)
             html = page.content()
             browser.close()
     except Exception as e:

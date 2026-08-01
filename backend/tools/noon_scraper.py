@@ -50,8 +50,8 @@ def _scrape_noon(query: str) -> list[dict]:
                 locale="en-US",
             )
             page = context.new_page()
-            page.goto(url, wait_until="commit", timeout=25000)
-            page.wait_for_timeout(3000)
+            page.goto(url, wait_until="commit", timeout=12000)
+            page.wait_for_timeout(1500)
             html = page.content()
             browser.close()
     except Exception as e:
