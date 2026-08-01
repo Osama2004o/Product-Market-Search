@@ -1,31 +1,19 @@
-"""Jumia scraper tool using high-performance HTTP Session + BeautifulSoup."""
+"""Jumia scraper tool using curl_cffi to bypass Cloudflare 403 blocks."""
 
 import json
 import logging
 import re
 from urllib.parse import quote_plus
 
-import requests
 from bs4 import BeautifulSoup
 from crewai.tools import BaseTool
+from curl_cffi import requests as crequests
 
 try:
-    from config import (
-        JUMIA_BASE_URL,
-        MAX_PRODUCTS_PER_SITE,
-        SCRAPER_PROXY_URL,
-        SELECTORS,
-        USER_AGENT,
-    )
+    from config import JUMIA_BASE_URL, MAX_PRODUCTS_PER_SITE, SELECTORS, USER_AGENT
     from models.schemas import RawProduct
 except ImportError:
-    from backend.config import (
-        JUMIA_BASE_URL,
-        MAX_PRODUCTS_PER_SITE,
-        SCRAPER_PROXY_URL,
-        SELECTORS,
-        USER_AGENT,
-    )
+    from backend.config import JUMIA_BASE_URL, MAX_PRODUCTS_PER_SITE, SELECTORS, USER_AGENT
     from backend.models.schemas import RawProduct
 
 logger = logging.getLogger(__name__)
@@ -33,34 +21,30 @@ sel = SELECTORS["jumia"]
 
 
 def _scrape_jumia(query: str) -> list[dict]:
-    """Search Jumia using HTTP Session with browser headers (fast & reliable)."""
+    """Search Jumia using browser TLS impersonation to bypass 403 Cloudflare blocks."""
     url = f"{JUMIA_BASE_URL}/catalog/?q={quote_plus(query)}"
     products = []
 
-    session = requests.Session()
-    session.headers.update({
-        "User-Agent": USER_AGENT,
+    headers = {
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9,ar;q=0.8",
-        "Sec-Ch-Ua": '"Chromium";v="125", "Not.A/Brand";v="24"',
-        "Sec-Ch-Ua-Mobile": "?0",
-        "Sec-Ch-Ua-Platform": '"Windows"',
-        "Sec-Fetch-Dest": "document",
-        "Sec-Fetch-Mode": "navigate",
-        "Sec-Fetch-Site": "none",
-        "Sec-Fetch-User": "?1",
         "Upgrade-Insecure-Requests": "1",
-    })
+    }
 
     try:
-        proxies = {"http": SCRAPER_PROXY_URL, "https": SCRAPER_PROXY_URL} if SCRAPER_PROXY_URL else None
-        response = session.get(url, timeout=12, proxies=proxies)
+        # impersonate="chrome120" bypasses Cloudflare TLS fingerprinting on Render
+        response = crequests.get(
+            url,
+            headers=headers,
+            impersonate="chrome120",
+            timeout=8,
+        )
         if response.status_code != 200:
             logger.warning(f"Jumia returned HTTP {response.status_code}")
             return []
         html = response.text
     except Exception as e:
-        logger.error(f"Jumia HTTP request failed: {e}")
+        logger.error(f"Jumia request failed: {e}")
         return []
 
     soup = BeautifulSoup(html, "html.parser")
@@ -71,13 +55,11 @@ def _scrape_jumia(query: str) -> list[dict]:
 
     for card in cards:
         try:
-            # Title
             title_el = card.select_one(sel["title"]) or card.select_one("h3.name") or card.select_one("h3")
             title = title_el.get_text(strip=True) if title_el else None
             if not title or len(title) < 3:
                 continue
 
-            # Price
             price = None
             price_el = card.select_one(sel["price"]) or card.select_one("div.prc")
             if price_el:
@@ -89,7 +71,6 @@ def _scrape_jumia(query: str) -> list[dict]:
                     except ValueError:
                         pass
 
-            # Rating
             rating = None
             rating_el = card.select_one(sel["rating"]) or card.select_one("div.stars")
             if rating_el:
@@ -107,7 +88,6 @@ def _scrape_jumia(query: str) -> list[dict]:
                         except ValueError:
                             pass
 
-            # Review count
             review_count = None
             rev_el = card.select_one(sel["review_count"]) or card.select_one("div.rev")
             if rev_el:
@@ -119,14 +99,12 @@ def _scrape_jumia(query: str) -> list[dict]:
                     except ValueError:
                         pass
 
-            # URL
             url_el = card.select_one(sel["url"]) or card.select_one("a.core") or card.select_one("a")
             product_url = None
             if url_el and url_el.get("href"):
                 href = url_el["href"]
                 product_url = href if href.startswith("http") else f"{JUMIA_BASE_URL}{href}"
 
-            # Image
             img_el = card.select_one(sel["image"]) or card.select_one("img")
             image_url = None
             if img_el:
@@ -161,7 +139,6 @@ class JumiaScraperTool(BaseTool):
     )
 
     def _run(self, query: str) -> str:
-        """Run the Jumia scraper synchronously."""
         try:
             results = _scrape_jumia(query)
         except Exception as e:

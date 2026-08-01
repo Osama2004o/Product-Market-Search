@@ -1,4 +1,4 @@
-"""Low-memory Noon scraper tool using Playwright Chromium with route blocking."""
+"""Noon scraper tool using Playwright with HTTP/2 disabled to prevent network errors."""
 
 import json
 import logging
@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 def _scrape_noon(query: str) -> list[dict]:
-    """Launch lightweight Chromium instance with blocked assets for minimum RAM consumption."""
+    """Launch lightweight Chromium with HTTP/1.1 forced to avoid ERR_HTTP2_PROTOCOL_ERROR."""
     url = f"{NOON_BASE_URL}/search?q={quote_plus(query)}"
     products = []
     html = ""
@@ -33,9 +33,9 @@ def _scrape_noon(query: str) -> list[dict]:
                     "--disable-gpu",
                     "--disable-dev-shm-usage",
                     "--no-sandbox",
-                    "--single-process",
+                    "--disable-http2",  # Fixes ERR_HTTP2_PROTOCOL_ERROR
                     "--js-flags=--max-old-space-size=64",
-                ]
+                ],
             }
             if SCRAPER_PROXY_URL:
                 launch_kwargs["proxy"] = {"server": SCRAPER_PROXY_URL}
@@ -48,15 +48,15 @@ def _scrape_noon(query: str) -> list[dict]:
             )
             page = context.new_page()
 
-            # Abort media/css/fonts to save RAM & load time
+            # Abort heavy assets (images/media) but keep scripts/styles for DOM stability
             page.route(
                 "**/*",
                 lambda route: route.abort()
-                if route.request.resource_type in ["image", "stylesheet", "font", "media"]
-                else route.continue_()
+                if route.request.resource_type in ["image", "font", "media"]
+                else route.continue_(),
             )
 
-            page.goto(url, wait_until="domcontentloaded", timeout=8000)
+            page.goto(url, wait_until="domcontentloaded", timeout=7000)
             html = page.content()
             browser.close()
     except Exception as e:
