@@ -1,4 +1,4 @@
-"""Jumia scraper tool using HTTP requests + BeautifulSoup."""
+"""Jumia scraper tool using Playwright (Chromium) + HTTP fallback + BeautifulSoup."""
 
 import json
 import logging
@@ -8,12 +8,25 @@ from urllib.parse import quote_plus
 import requests
 from bs4 import BeautifulSoup
 from crewai.tools import BaseTool
+from playwright.sync_api import sync_playwright
 
 try:
-    from config import JUMIA_BASE_URL, MAX_PRODUCTS_PER_SITE, SELECTORS, USER_AGENT
+    from config import (
+        HEADLESS,
+        JUMIA_BASE_URL,
+        MAX_PRODUCTS_PER_SITE,
+        SELECTORS,
+        USER_AGENT,
+    )
     from models.schemas import RawProduct
 except ImportError:
-    from backend.config import JUMIA_BASE_URL, MAX_PRODUCTS_PER_SITE, SELECTORS, USER_AGENT
+    from backend.config import (
+        HEADLESS,
+        JUMIA_BASE_URL,
+        MAX_PRODUCTS_PER_SITE,
+        SELECTORS,
+        USER_AGENT,
+    )
     from backend.models.schemas import RawProduct
 
 logger = logging.getLogger(__name__)
@@ -21,21 +34,55 @@ sel = SELECTORS["jumia"]
 
 
 def _scrape_jumia(query: str) -> list[dict]:
-    """Search Jumia using HTTP request, parse product cards."""
+    """Search Jumia using Playwright Chromium with HTTP fallback."""
     url = f"{JUMIA_BASE_URL}/catalog/?q={quote_plus(query)}"
     products = []
-    headers = {
-        "User-Agent": USER_AGENT,
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9,ar;q=0.8",
-    }
+    html = ""
 
+    # 1. Try fetching via Playwright to bypass Cloudflare 403 Forbidden
     try:
-        response = requests.get(url, headers=headers, timeout=12)
-        response.raise_for_status()
-        html = response.text
+        with sync_playwright() as p:
+            browser = p.chromium.launch(
+                headless=HEADLESS,
+                args=[
+                    "--disable-http2",
+                    "--disable-blink-features=AutomationControlled",
+                    "--no-sandbox",
+                ],
+            )
+            context = browser.new_context(
+                user_agent=USER_AGENT,
+                viewport={"width": 1400, "height": 900},
+                locale="en-US",
+                extra_http_headers={
+                    "Accept-Language": "en-US,en;q=0.9,ar;q=0.8",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                },
+            )
+            page = context.new_page()
+            page.goto(url, wait_until="domcontentloaded", timeout=20000)
+            page.wait_for_timeout(2000)
+            html = page.content()
+            browser.close()
     except Exception as e:
-        logger.error(f"Jumia HTTP request error: {e}")
+        logger.warning(f"Jumia Playwright error: {e}. Trying HTTP fallback...")
+        try:
+            headers = {
+                "User-Agent": USER_AGENT,
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.9,ar;q=0.8",
+                "Sec-Ch-Ua": '"Chromium";v="125", "Not.A/Brand";v="24"',
+                "Sec-Ch-Ua-Mobile": "?0",
+                "Sec-Ch-Ua-Platform": '"Windows"',
+                "Upgrade-Insecure-Requests": "1",
+            }
+            response = requests.get(url, headers=headers, timeout=12)
+            if response.status_code == 200:
+                html = response.text
+        except Exception as http_err:
+            logger.error(f"Jumia HTTP request error: {http_err}")
+
+    if not html:
         return []
 
     soup = BeautifulSoup(html, "html.parser")

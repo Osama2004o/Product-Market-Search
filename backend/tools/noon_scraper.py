@@ -1,4 +1,4 @@
-"""Noon scraper tool using Playwright (Firefox) + BeautifulSoup."""
+"""Noon scraper tool using Playwright (Chromium) + BeautifulSoup."""
 
 import json
 import logging
@@ -30,55 +30,73 @@ logger = logging.getLogger(__name__)
 
 
 def _scrape_noon(query: str) -> list[dict]:
-    """Launch Firefox browser, search Noon, parse product cards."""
+    """Launch Chromium browser, search Noon, parse product cards."""
     url = f"{NOON_BASE_URL}/search?q={quote_plus(query)}"
     products = []
+    html = ""
 
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=HEADLESS)
+            browser = p.chromium.launch(
+                headless=HEADLESS,
+                args=[
+                    "--disable-http2",
+                    "--disable-blink-features=AutomationControlled",
+                    "--no-sandbox",
+                ],
+            )
             context = browser.new_context(
                 user_agent=USER_AGENT,
                 viewport={"width": 1400, "height": 900},
                 locale="en-US",
+                extra_http_headers={
+                    "Accept-Language": "en-US,en;q=0.9,ar;q=0.8",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                },
             )
             page = context.new_page()
-            page.goto(url, wait_until="commit", timeout=25000)
-            page.wait_for_timeout(3000)
+            page.goto(url, wait_until="domcontentloaded", timeout=25000)
+            page.wait_for_timeout(2500)
             html = page.content()
             browser.close()
     except Exception as e:
-        logger.error(f"Noon Playwright Firefox error: {e}")
+        logger.error(f"Noon Playwright error: {e}")
         return []
 
     soup = BeautifulSoup(html, "html.parser")
-    # Noon product links contain '/p/'
-    links = soup.select("a[href*='/p/']")
+    # Select Noon product links or container elements
+    links = soup.select("a[href*='/p/']") or soup.select("div[data-qa='product-name']") or soup.select("a")
     seen_urls = set()
 
     for link in links:
         if len(products) >= MAX_PRODUCTS_PER_SITE:
             break
         try:
-            href = link.get("href", "")
-            if not href or href in seen_urls:
+            # If element is not an <a> tag, find parent <a>
+            a_tag = link if link.name == "a" else link.find_parent("a")
+            href = a_tag.get("href", "") if a_tag else ""
+            
+            if not href or "/p/" not in href or href in seen_urls:
                 continue
             seen_urls.add(href)
 
             product_url = href if href.startswith("http") else f"https://www.noon.com{href}"
 
-            # Extract title & price from link card text or inner spans
-            text = link.get_text(" ", strip=True)
-            if not text or len(text) < 10:
+            text = a_tag.get_text(" ", strip=True) if a_tag else ""
+            if not text or len(text) < 5:
                 continue
 
             # Title
-            title_el = link.select_one("div[data-qa='product-name']") or link.select_one("h2") or link.select_one("span")
+            title_el = (a_tag.select_one("div[data-qa='product-name']") or 
+                        a_tag.select_one("h2") or 
+                        a_tag.select_one("span"))
             title = title_el.get_text(strip=True) if title_el else text.split("EGP")[0].strip()
+            if not title or len(title) < 3:
+                continue
 
             # Price
             price = None
-            price_match = re.search(r"EGP\s*([\d,.]+)", text)
+            price_match = re.search(r"EGP\s*([\d,.]+)", text) or re.search(r"([\d,.]+)\s*EGP", text)
             if price_match:
                 try:
                     price = float(price_match.group(1).replace(",", ""))
@@ -97,7 +115,7 @@ def _scrape_noon(query: str) -> list[dict]:
                     pass
 
             # Image
-            img_el = link.select_one("img")
+            img_el = a_tag.select_one("img") if a_tag else None
             image_url = None
             if img_el:
                 image_url = img_el.get("src") or img_el.get("data-src")
