@@ -1,4 +1,4 @@
-"""Noon scraper tool using Playwright (Chromium) + BeautifulSoup."""
+"""Low-memory Noon scraper tool using Playwright Chromium with route blocking."""
 
 import json
 import logging
@@ -10,56 +10,60 @@ from crewai.tools import BaseTool
 from playwright.sync_api import sync_playwright
 
 try:
-    from config import (
-        HEADLESS,
-        MAX_PRODUCTS_PER_SITE,
-        NOON_BASE_URL,
-        SCRAPER_PROXY_URL,
-        USER_AGENT,
-    )
+    from config import HEADLESS, MAX_PRODUCTS_PER_SITE, NOON_BASE_URL, SCRAPER_PROXY_URL, USER_AGENT
     from models.schemas import RawProduct
 except ImportError:
-    from backend.config import (
-        HEADLESS,
-        MAX_PRODUCTS_PER_SITE,
-        NOON_BASE_URL,
-        SCRAPER_PROXY_URL,
-        USER_AGENT,
-    )
+    from backend.config import HEADLESS, MAX_PRODUCTS_PER_SITE, NOON_BASE_URL, SCRAPER_PROXY_URL, USER_AGENT
     from backend.models.schemas import RawProduct
 
 logger = logging.getLogger(__name__)
 
 
 def _scrape_noon(query: str) -> list[dict]:
-    """Launch Firefox browser, search Noon, parse product cards."""
+    """Launch lightweight Chromium instance with blocked assets for minimum RAM consumption."""
     url = f"{NOON_BASE_URL}/search?q={quote_plus(query)}"
     products = []
     html = ""
 
     try:
         with sync_playwright() as p:
-            launch_kwargs = {"headless": HEADLESS}
+            launch_kwargs = {
+                "headless": HEADLESS,
+                "args": [
+                    "--disable-gpu",
+                    "--disable-dev-shm-usage",
+                    "--no-sandbox",
+                    "--single-process",
+                    "--js-flags=--max-old-space-size=64",
+                ]
+            }
             if SCRAPER_PROXY_URL:
                 launch_kwargs["proxy"] = {"server": SCRAPER_PROXY_URL}
 
-            browser = p.firefox.launch(**launch_kwargs)
+            browser = p.chromium.launch(**launch_kwargs)
             context = browser.new_context(
                 user_agent=USER_AGENT,
-                viewport={"width": 1400, "height": 900},
+                viewport={"width": 1280, "height": 720},
                 locale="en-US",
             )
             page = context.new_page()
-            page.goto(url, wait_until="commit", timeout=25000)
-            page.wait_for_timeout(3000)
+
+            # Abort media/css/fonts to save RAM & load time
+            page.route(
+                "**/*",
+                lambda route: route.abort()
+                if route.request.resource_type in ["image", "stylesheet", "font", "media"]
+                else route.continue_()
+            )
+
+            page.goto(url, wait_until="domcontentloaded", timeout=8000)
             html = page.content()
             browser.close()
     except Exception as e:
-        logger.error(f"Noon Playwright Firefox error: {e}")
+        logger.error(f"Noon Playwright error: {e}")
         return []
 
     soup = BeautifulSoup(html, "html.parser")
-    # Noon product links contain '/p/'
     links = soup.select("a[href*='/p/']") or soup.select("div[data-qa='product-item']") or soup.select("a")
     seen_urls = set()
 
@@ -69,7 +73,7 @@ def _scrape_noon(query: str) -> list[dict]:
         try:
             a_tag = link if link.name == "a" else link.find_parent("a")
             href = a_tag.get("href", "") if a_tag else ""
-            
+
             if not href or "/p/" not in href or href in seen_urls:
                 continue
             seen_urls.add(href)
@@ -79,15 +83,15 @@ def _scrape_noon(query: str) -> list[dict]:
             if not text or len(text) < 5:
                 continue
 
-            # Title
-            title_el = (a_tag.select_one("div[data-qa='product-name']") or 
-                        a_tag.select_one("h2") or 
-                        a_tag.select_one("span"))
+            title_el = (
+                a_tag.select_one("div[data-qa='product-name']")
+                or a_tag.select_one("h2")
+                or a_tag.select_one("span")
+            )
             title = title_el.get_text(strip=True) if title_el else text.split("EGP")[0].strip()
             if not title or len(title) < 3:
                 continue
 
-            # Price
             price = None
             price_match = re.search(r"EGP\s*([\d,.]+)", text) or re.search(r"([\d,.]+)\s*EGP", text)
             if price_match:
@@ -96,7 +100,6 @@ def _scrape_noon(query: str) -> list[dict]:
                 except ValueError:
                     pass
 
-            # Rating
             rating = None
             rating_match = re.search(r"([\d.]+)\s*(?:★|\(\d+\))", text)
             if rating_match:
@@ -107,7 +110,6 @@ def _scrape_noon(query: str) -> list[dict]:
                 except ValueError:
                     pass
 
-            # Image
             img_el = a_tag.select_one("img") if a_tag else None
             image_url = img_el.get("src") or img_el.get("data-src") if img_el else None
 
@@ -139,7 +141,6 @@ class NoonScraperTool(BaseTool):
     )
 
     def _run(self, query: str) -> str:
-        """Run the Noon scraper synchronously."""
         try:
             results = _scrape_noon(query)
         except Exception as e:

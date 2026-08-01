@@ -35,7 +35,7 @@ async def run_product_search(query: str) -> dict[str, Any]:
     """
     warnings: list[str] = []
 
-    # 1. Scrape e-commerce platforms sequentially to keep RAM under Render's 512MB limit
+    # 1. Scrape e-commerce platforms sequentially with tight timeouts
     logger.info(f"Starting low-memory sequential scraping for query: '{query}'")
     all_raw_products: list[dict] = []
     scrapers = [
@@ -46,13 +46,10 @@ async def run_product_search(query: str) -> dict[str, Any]:
 
     for site, scraper_func in scrapers:
         try:
-            if site in ("noon", "jumia"):
-                res = await asyncio.wait_for(
-                    asyncio.to_thread(scraper_func, query),
-                    timeout=20.0,
-                )
-            else:
-                res = await asyncio.to_thread(scraper_func, query)
+            res = await asyncio.wait_for(
+                asyncio.to_thread(scraper_func, query),
+                timeout=8.0,
+            )
 
             if isinstance(res, list) and res:
                 logger.info(f"Fetched {len(res)} products from {site}")
@@ -61,7 +58,7 @@ async def run_product_search(query: str) -> dict[str, Any]:
                 logger.warning(f"No products returned from {site}")
                 warnings.append(f"No results from {site.capitalize()}")
         except asyncio.TimeoutError:
-            logger.warning(f"Scraper for '{site}' timed out after 20s. Moving to next site.")
+            logger.warning(f"Scraper for '{site}' timed out after 8s. Moving to next site.")
             warnings.append(f"Scraper for {site.capitalize()} timed out.")
         except Exception as e:
             logger.error(f"Scraper error on {site}: {e}")
