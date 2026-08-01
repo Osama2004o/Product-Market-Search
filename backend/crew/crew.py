@@ -3,20 +3,23 @@
 import asyncio
 import json
 import logging
+import os
 from typing import Any
+
+# Disable CrewAI interactive telemetry/tracing prompt timeout in server environment
+os.environ["CREWAI_TELEMETRY_OPT_OUT"] = "true"
+os.environ["OTEL_SDK_DISABLED"] = "true"
 
 from crewai import Crew, Process, Task
 
 try:
-    from crew.agents import create_normalizer_agent, create_ranking_agent
-    from crew.tasks import create_normalize_task, create_ranking_task
+    from crew.agents import create_ranking_agent
     from models.schemas import Product
     from tools.amazon_scraper import _scrape_amazon
     from tools.noon_scraper import _scrape_noon
     from tools.jumia_scraper import _scrape_jumia
 except ImportError:
-    from backend.crew.agents import create_normalizer_agent, create_ranking_agent
-    from backend.crew.tasks import create_normalize_task, create_ranking_task
+    from backend.crew.agents import create_ranking_agent
     from backend.models.schemas import Product
     from backend.tools.amazon_scraper import _scrape_amazon
     from backend.tools.noon_scraper import _scrape_noon
@@ -56,10 +59,10 @@ async def run_product_search(query: str) -> dict[str, Any]:
     if not all_raw_products:
         return {"results": [], "warnings": warnings + ["No products found matching your search query."]}
 
-    # 2. Python fallback normalization and scoring (ensures zero downtime)
+    # 2. Compute baseline Python ranking (ensures instant results)
     fallback_ranked = _compute_python_ranking(all_raw_products)
 
-    # 3. Pass to CrewAI agents for LLM ranking & justification
+    # 3. Pass to CrewAI agent for LLM value scoring & justification
     try:
         ranking_agent = create_ranking_agent()
         raw_json_input = json.dumps(all_raw_products, ensure_ascii=False)
@@ -83,7 +86,7 @@ async def run_product_search(query: str) -> dict[str, Any]:
             agents=[ranking_agent],
             tasks=[ranking_task],
             process=Process.sequential,
-            verbose=True,
+            verbose=False,
         )
 
         result = await crew.kickoff_async()
@@ -91,9 +94,10 @@ async def run_product_search(query: str) -> dict[str, Any]:
         llm_products = _parse_crew_output(raw_output, warnings)
 
         if llm_products:
+            logger.info(f"Successfully processed {len(llm_products)} ranked products from LLM.")
             return {"results": llm_products, "warnings": warnings}
     except Exception as e:
-        logger.warning(f"LLM ranking agent failed: {e}. Falling back to Python algorithm.")
+        logger.warning(f"LLM ranking agent failed: {e}. Returning python ranked products.")
         warnings.append("Used automatic algorithmic ranking fallback.")
 
     return {"results": fallback_ranked, "warnings": warnings}
@@ -101,12 +105,7 @@ async def run_product_search(query: str) -> dict[str, Any]:
 
 def _compute_python_ranking(raw_products: list[dict]) -> list[dict]:
     """Calculate price-to-rating value scores deterministically in Python."""
-    valid_items = []
-
-    for item in raw_products:
-        p = item.get("price")
-        r = item.get("rating")
-        valid_items.append(item)
+    valid_items = [item for item in raw_products if item.get("title")]
 
     prices = [i["price"] for i in valid_items if i.get("price") is not None]
     ratings = [i["rating"] for i in valid_items if i.get("rating") is not None]
@@ -131,10 +130,11 @@ def _compute_python_ranking(raw_products: list[dict]) -> list[dict]:
             "currency": "EGP",
             "rating": rating,
             "review_count": item.get("review_count"),
-            "description": item.get("description", f"Listing on {item.get('site', '').capitalize()}"),
+            "description": item.get("description", f"Listing on {str(item.get('site', '')).capitalize()}"),
             "url": item.get("url", "#"),
             "image_url": item.get("image_url"),
             "score": score,
+            "rank": 1,
             "justification": f"Rated {rating}/5 with competitive pricing at {price:,.0f} EGP.",
         }
         ranked.append(product_dict)
@@ -155,18 +155,33 @@ def _parse_crew_output(raw_output: str, warnings: list[str]) -> list[dict]:
         elif "```" in text:
             text = text.split("```")[1].split("```")[0].strip()
 
-        start = text.index("[")
+        start = text.find("[")
         end = text.rindex("]") + 1
-        json_str = text[start:end]
+        if start == -1 or end <= start:
+            return []
 
+        json_str = text[start:end]
         raw_list = json.loads(json_str)
+
         products = []
         for item in raw_list:
             try:
+                # Soft type coercion for resilience
+                if item.get("price") is not None:
+                    item["price"] = float(item["price"])
+                if item.get("rating") is not None:
+                    item["rating"] = float(item["rating"])
+                if item.get("score") is not None:
+                    item["score"] = float(item["score"])
+                if item.get("rank") is not None:
+                    item["rank"] = int(item["rank"])
+                
                 product = Product(**item)
                 products.append(product.model_dump())
             except Exception as e:
-                logger.warning(f"Failed to parse product item: {e}")
+                logger.warning(f"Soft conversion fallback for product item: {e}")
+                if isinstance(item, dict) and "title" in item:
+                    products.append(item)
                 continue
         return products
 
