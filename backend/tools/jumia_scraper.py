@@ -54,7 +54,7 @@ def _scrape_jumia(query: str) -> list[dict]:
 
     try:
         proxies = {"http": SCRAPER_PROXY_URL, "https": SCRAPER_PROXY_URL} if SCRAPER_PROXY_URL else None
-        response = session.get(url, timeout=8, proxies=proxies)
+        response = session.get(url, timeout=12, proxies=proxies)
         if response.status_code != 200:
             logger.warning(f"Jumia returned HTTP {response.status_code}")
             return []
