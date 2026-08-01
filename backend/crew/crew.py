@@ -35,26 +35,24 @@ async def run_product_search(query: str) -> dict[str, Any]:
     """
     warnings: list[str] = []
 
-    # 1. Scrape all 3 e-commerce platforms concurrently in parallel threads
-    logger.info(f"Starting parallel scraping for query: '{query}'")
-    scraped_results = await asyncio.gather(
-        asyncio.to_thread(_scrape_amazon, query),
-        asyncio.to_thread(_scrape_noon, query),
-        asyncio.to_thread(_scrape_jumia, query),
-        return_exceptions=True,
-    )
-
+    # 1. Scrape e-commerce platforms sequentially to keep RAM under Render's 512MB limit
+    logger.info(f"Starting low-memory sequential scraping for query: '{query}'")
     all_raw_products: list[dict] = []
-    site_names = ["amazon", "noon", "jumia"]
+    scrapers = [
+        ("amazon", _scrape_amazon),
+        ("noon", _scrape_noon),
+        ("jumia", _scrape_jumia),
+    ]
 
-    for idx, res in enumerate(scraped_results):
-        site = site_names[idx]
-        if isinstance(res, Exception):
-            logger.error(f"Scraper error on {site}: {res}")
+    for site, scraper_func in scrapers:
+        try:
+            res = await asyncio.to_thread(scraper_func, query)
+            if isinstance(res, list):
+                logger.info(f"Fetched {len(res)} products from {site}")
+                all_raw_products.extend(res)
+        except Exception as e:
+            logger.error(f"Scraper error on {site}: {e}")
             warnings.append(f"Failed to fetch products from {site.capitalize()}")
-        elif isinstance(res, list):
-            logger.info(f"Fetched {len(res)} products from {site}")
-            all_raw_products.extend(res)
 
     if not all_raw_products:
         return {"results": [], "warnings": warnings + ["No products found matching your search query."]}
