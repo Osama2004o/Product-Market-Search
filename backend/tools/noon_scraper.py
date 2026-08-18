@@ -43,7 +43,7 @@ def _scrape_noon(query: str) -> list[dict]:
                 locale="en-US",
             )
             page = context.new_page()
-            page.goto(url, wait_until="commit", timeout=25000)
+            page.goto(url, wait_until="domcontentloaded", timeout=25000)
             page.wait_for_timeout(3000)
             html = page.content()
             browser.close()
@@ -96,11 +96,16 @@ def _scrape_noon(query: str) -> list[dict]:
                 except ValueError:
                     pass
 
-            # Image
-            img_el = link.select_one("img")
+            # Image: Noon cards contain a placeholder SVG before the real product image
             image_url = None
-            if img_el:
-                image_url = img_el.get("src") or img_el.get("data-src")
+            for img_el in link.select("img"):
+                src = img_el.get("src") or img_el.get("data-src") or img_el.get("srcset")
+                if not src:
+                    continue
+                if "media-placeholder" in src or "placeholder" in src or src.endswith(".svg") or "icons/" in src:
+                    continue
+                image_url = src
+                break
 
             products.append(
                 RawProduct(

@@ -8,9 +8,10 @@ def create_scrape_amazon_task(agent: Agent, query: str) -> Task:
         description=(
             f"Search Amazon Egypt for: '{query}'. "
             "Use the scrape_amazon tool with this exact query. "
-            "Return the raw JSON output from the tool as-is."
+            "Return the raw JSON output from the tool as-is. "
+            "If no products are found, return [] as valid JSON."
         ),
-        expected_output="A JSON array of product objects from Amazon with title, price, rating, url fields.",
+        expected_output="A JSON array of product objects from Amazon, or [] if empty.",
         agent=agent,
     )
 
@@ -20,9 +21,10 @@ def create_scrape_noon_task(agent: Agent, query: str) -> Task:
         description=(
             f"Search Noon Egypt for: '{query}'. "
             "Use the scrape_noon tool with this exact query. "
-            "Return the raw JSON output from the tool as-is."
+            "Return the raw JSON output from the tool as-is. "
+            "If no products are found, return [] as valid JSON."
         ),
-        expected_output="A JSON array of product objects from Noon with title, price, rating, url fields.",
+        expected_output="A JSON array of product objects from Noon, or [] if empty.",
         agent=agent,
     )
 
@@ -32,9 +34,10 @@ def create_scrape_jumia_task(agent: Agent, query: str) -> Task:
         description=(
             f"Search Jumia Egypt for: '{query}'. "
             "Use the scrape_jumia tool with this exact query. "
-            "Return the raw JSON output from the tool as-is."
+            "Return the raw JSON output from the tool as-is. "
+            "If no products are found, return [] as valid JSON."
         ),
-        expected_output="A JSON array of product objects from Jumia with title, price, rating, url fields.",
+        expected_output="A JSON array of product objects from Jumia, or [] if empty.",
         agent=agent,
     )
 

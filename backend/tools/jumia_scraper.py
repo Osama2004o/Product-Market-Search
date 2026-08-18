@@ -31,7 +31,7 @@ def _scrape_jumia(query: str) -> list[dict]:
     }
 
     try:
-        response = requests.get(url, headers=headers, timeout=12)
+        response = requests.get(url, headers=headers, timeout=30)
         response.raise_for_status()
         html = response.text
     except Exception as e:

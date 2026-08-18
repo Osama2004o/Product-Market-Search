@@ -4,10 +4,13 @@ import os
 from dotenv import load_dotenv
 
 load_dotenv()
-
 # API Keys
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini/gemini-2.0-flash-lite")
+
+if GEMINI_API_KEY:
+    os.environ["GEMINI_API_KEY"] = GEMINI_API_KEY
+    os.environ["GOOGLE_API_KEY"] = GEMINI_API_KEY
 
 # Site base URLs
 AMAZON_BASE_URL = os.getenv("AMAZON_BASE_URL", "https://www.amazon.eg")
