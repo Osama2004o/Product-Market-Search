@@ -13,14 +13,14 @@
 
 ## ✨ Features
 
-| Feature | Description |
-|---|---|
-| 🕵️ **Live Web Scraping** | Real-time scraping of product listings from **Amazon Egypt**, **Noon Egypt**, and **Jumia Egypt** using Playwright + BeautifulSoup |
-| 🤖 **5 Specialized AI Agents** | CrewAI-orchestrated agents — 3 scrapers, 1 data normalizer, 1 ranking analyst — each with a focused role |
-| 📊 **Smart Value Scoring** | Min-max normalization of rating vs. price across all results, producing a relative value score per product |
-| ⚡ **Async FastAPI Backend** | Non-blocking REST API with partial-result fallbacks and per-site error isolation |
-| 🎨 **Glassmorphism React UI** | Modern dark-mode interface with animated blobs, site-colored badges, star ratings, and direct product links |
-| 🔗 **Cross-Platform Comparison** | Unified currency (EGP), consistent schema, and AI-generated justification for each product's ranking |
+| Feature                          | Description                                                                                                                        |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| 🕵️ **Live Web Scraping**         | Real-time scraping of product listings from **Amazon Egypt**, **Noon Egypt**, and **Jumia Egypt** using Playwright + BeautifulSoup |
+| 🤖 **5 Specialized AI Agents**   | CrewAI-orchestrated agents — 3 scrapers, 1 data normalizer, 1 ranking analyst — each with a focused role                           |
+| 📊 **Smart Value Scoring**       | Min-max normalization of rating vs. price across all results, producing a relative value score per product                         |
+| ⚡ **Async FastAPI Backend**     | Non-blocking REST API with partial-result fallbacks and per-site error isolation                                                   |
+| 🎨 **Glassmorphism React UI**    | Modern dark-mode interface with animated blobs, site-colored badges, star ratings, and direct product links                        |
+| 🔗 **Cross-Platform Comparison** | Unified currency (EGP), consistent schema, and AI-generated justification for each product's ranking                               |
 
 ---
 
@@ -80,14 +80,14 @@
 
 ## 🛠️ Tech Stack
 
-| Layer | Technology | Purpose |
-|---|---|---|
-| **AI Orchestration** | CrewAI | Multi-agent pipeline with sequential task execution |
-| **LLM** | Google Gemini (2.0 Flash Lite) | Normalization reasoning & value-score justifications |
-| **Web Scraping** | Playwright + BeautifulSoup | Headless browser rendering + HTML parsing |
-| **Backend API** | FastAPI (async) | REST endpoint with CORS, error handling, Pydantic validation |
-| **Frontend** | React + Vite | Glassmorphism UI with animated components |
-| **Data Validation** | Pydantic v2 | Strict schema enforcement for product data flow |
+| Layer                | Technology                     | Purpose                                                      |
+| -------------------- | ------------------------------ | ------------------------------------------------------------ |
+| **AI Orchestration** | CrewAI                         | Multi-agent pipeline with sequential task execution          |
+| **LLM**              | Google Gemini (2.0 Flash Lite) | Normalization reasoning & value-score justifications         |
+| **Web Scraping**     | Playwright + BeautifulSoup     | Headless browser rendering + HTML parsing                    |
+| **Backend API**      | FastAPI (async)                | REST endpoint with CORS, error handling, Pydantic validation |
+| **Frontend**         | React + Vite                   | Glassmorphism UI with animated components                    |
+| **Data Validation**  | Pydantic v2                    | Strict schema enforcement for product data flow              |
 
 ---
 
@@ -131,11 +131,11 @@ Product-Market-Search/
 
 ## ⚙️ Prerequisites
 
-| Requirement | Version |
-|---|---|
-| Python | 3.10+ |
-| Node.js | v18.0.0+ |
-| npm | v9.0.0+ |
+| Requirement           | Version                                      |
+| --------------------- | -------------------------------------------- |
+| Python                | 3.10+                                        |
+| Node.js               | v18.0.0+                                     |
+| npm                   | v9.0.0+                                      |
 | Google Gemini API Key | [Get one here](https://aistudio.google.com/) |
 
 ---
@@ -209,6 +209,16 @@ npm run dev
 
 > Frontend live at `http://localhost:5173`
 
+### Run with Docker Compose
+
+Copy `backend/.env.example` to `backend/.env` and set `GEMINI_API_KEY`, then run from the repository root:
+
+```bash
+docker compose up --build
+```
+
+Open the frontend at `http://localhost:8080`. Nginx serves the built frontend and proxies `/api` requests to FastAPI. The backend API is also available directly at `http://localhost:8000`; stop the stack with `docker compose down`.
+
 ---
 
 ## 📡 API Reference
@@ -218,6 +228,7 @@ npm run dev
 Search across all three platforms with a single request.
 
 **Request:**
+
 ```json
 {
   "query": "iPhone 15 128GB"
@@ -225,6 +236,7 @@ Search across all three platforms with a single request.
 ```
 
 **Response:**
+
 ```json
 {
   "query": "iPhone 15 128GB",
